@@ -12,7 +12,9 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Pool;
 import com.badlogic.gdx.utils.TimeUtils;
+import com.meteos.game.Models.Raindrop;
 
 import java.util.Iterator;
 
@@ -25,7 +27,13 @@ public class GameScreen implements Screen {
     Music rainMusic;
     OrthographicCamera camera;
     Rectangle bucket;
-    Array<Rectangle> raindrops;
+    Array<Raindrop> activeRaindrops = new Array<Raindrop>();
+    Pool<Raindrop> raindropPool = new Pool<Raindrop>() {
+        @Override
+        protected Raindrop newObject() {
+            return new Raindrop();
+        }
+    };
     long lastDropTime;
     int dropsGathered;
 
@@ -54,18 +62,15 @@ public class GameScreen implements Screen {
         bucket.height = 64;
 
         // create the raindrops array and spawn the first raindrop
-        raindrops = new Array<Rectangle>();
+        activeRaindrops = new Array<Raindrop>();
         spawnRaindrop();
 
     }
 
     private void spawnRaindrop() {
-        Rectangle raindrop = new Rectangle();
-        raindrop.x = MathUtils.random(0, 800 - 64);
-        raindrop.y = 480;
-        raindrop.width = 64;
-        raindrop.height = 64;
-        raindrops.add(raindrop);
+        Raindrop raindrop = raindropPool.obtain();
+        raindrop.init();
+        activeRaindrops.add(raindrop);
         lastDropTime = TimeUtils.nanoTime();
     }
 
@@ -89,8 +94,9 @@ public class GameScreen implements Screen {
         // all drops
         game.batch.begin();
         game.font.draw(game.batch, "Drops Collected: " + dropsGathered, 0, 480);
+        game.font.draw(game.batch, "... And pool size: " + raindropPool.getFree(), 480, 480);
         game.batch.draw(bucketImage, bucket.x, bucket.y);
-        for (Rectangle raindrop : raindrops) {
+        for (Raindrop raindrop : activeRaindrops) {
             game.batch.draw(dropImage, raindrop.x, raindrop.y);
         }
         game.batch.end();
@@ -114,23 +120,28 @@ public class GameScreen implements Screen {
             bucket.x = 800 - 64;
 
         // check if we need to create a new raindrop
-        if (TimeUtils.nanoTime() - lastDropTime > 1000000000)
+        if (TimeUtils.nanoTime() - lastDropTime > 1000000000 +  MathUtils.random(0, 1000000000) - 50000000)
             spawnRaindrop();
 
         // move the raindrops, remove any that are beneath the bottom edge of
         // the screen or that hit the bucket. In the later case we increase the
         // value our drops counter and add a sound effect.
-        Iterator<Rectangle> iter = raindrops.iterator();
+        Iterator<Raindrop> iter = activeRaindrops.iterator();
         while (iter.hasNext()) {
-            Rectangle raindrop = iter.next();
-            raindrop.y -= 200 * Gdx.graphics.getDeltaTime();
-            if (raindrop.y + 64 < 0)
-                iter.remove();
+            Raindrop raindrop = iter.next();
+            raindrop.update(Gdx.graphics.getDeltaTime());
             if (raindrop.overlaps(bucket)) {
                 dropsGathered++;
                 dropSound.play();
+                raindrop.reset();
                 iter.remove();
             }
+            else if (raindrop.hasFallen()) {
+                raindrop.reset();
+                iter.remove();
+            }
+            if (!raindrop.alive)
+                raindropPool.free(raindrop);
         }
     }
 
